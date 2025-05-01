@@ -1,25 +1,29 @@
 from fastapi import FastAPI, Request
 from sidecar import Sidecar
 import requests
+import sys
+import os
 
-# Store acceptor addresses (will fetch from Coordinator)
+# Initialize FastAPI
+app = FastAPI()
+assigned_range = []
 acceptor_addresses = []
 
-app = FastAPI()
-sidecar = Sidecar("Proposer")
-assigned_range = []
+# Dynamically get current port (default to 8001 if not passed)
+port = os.environ.get("PORT", "8001")
+address = f"http://localhost:{port}"
+sidecar = Sidecar(f"Proposer-{port}")
 
 @app.on_event("startup")
 def register_with_coordinator():
-    # Change this if your coordinator runs on another IP/port
     coordinator_url = "http://localhost:8000/register"
     info = {
         "type": "proposer",
-        "address": "http://localhost:8001"  # This proposer's address
+        "address": address
     }
     try:
         requests.post(coordinator_url, json=info)
-        sidecar.log("Registered with coordinator")
+        sidecar.log(f"Registered with coordinator as {address}")
     except Exception as e:
         sidecar.log(f"Registration failed: {e}")
 
@@ -27,7 +31,7 @@ def register_with_coordinator():
 async def assign_range(request: Request):
     data = await request.json()
     global assigned_range
-    assigned_range = [char.lower() for char in data.get("range", [])]  # <-- lowercase
+    assigned_range = [char.lower() for char in data.get("range", [])]
     sidecar.log(f"Received letter range: {assigned_range}")
     return {"message": "Range assigned"}
 
@@ -39,6 +43,8 @@ async def process_line(request: Request):
     result = {}
 
     for word in words:
+        if not word:
+            continue
         first_letter = word[0].lower()
         if first_letter in assigned_range:
             result.setdefault(first_letter, []).append(word)
@@ -47,7 +53,6 @@ async def process_line(request: Request):
     sidecar.log(f"Words counted: {result}")
 
     send_to_acceptors(result)
-
     return {"counts": result}
 
 def send_to_acceptors(result):
